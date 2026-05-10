@@ -1687,6 +1687,30 @@ function changeMonth(dir){
 }
 
 // ═══════════════════════════════════════════════════════
+// NLP INPUT
+// ═══════════════════════════════════════════════════════
+document.getElementById('nlp-input').addEventListener('keydown', e => {
+  if (e.key !== 'Enter') return;
+  const raw = e.target.value.trim();
+  if (!raw) return;
+  e.target.value = '';
+  const p = parseNLP(raw);
+  document.getElementById('preview-title').value    = p.title;
+  document.getElementById('preview-cat').value      = p.catId || '';
+  document.getElementById('preview-priority').value = p.priority;
+  document.getElementById('preview-date').value     = p.dueDate;
+  document.getElementById('preview-time').value     = p.dueTime;
+  let summary = '';
+  if (p.dueDate) {
+    const d = new Date(p.dueDate + 'T00:00:00');
+    summary += p.dueDate === todayStr ? 'Today' : p.dueDate === tomorrowStr ? 'Tomorrow' : d.toLocaleDateString('en-GB', {day:'numeric', month:'short'});
+  }
+  if (p.dueTime) summary += (summary ? ' · ' : '') + formatTime(p.dueTime);
+  document.getElementById('preview-summary').textContent = summary || 'No date detected — set one below';
+  openModal('nlp-preview');
+});
+
+// ═══════════════════════════════════════════════════════
 // INIT
 // ═══════════════════════════════════════════════════════
 boot();
