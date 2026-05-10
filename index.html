@@ -257,6 +257,7 @@ body { font-family:var(--font); background:var(--bg); color:var(--text-primary);
 <div id="loading-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.35);z-index:999;align-items:center;justify-content:center;flex-direction:column;gap:12px">
   <div style="width:36px;height:36px;border:3px solid rgba(255,255,255,0.3);border-top-color:#fff;border-radius:50%;animation:spin 0.7s linear infinite"></div>
   <div style="color:#fff;font-size:14px;font-family:var(--font)">Loading…</div>
+  <button id="retry-btn" onclick="boot()" style="display:none;margin-top:8px;background:#fff;color:#1A1917;border:none;border-radius:8px;padding:8px 20px;font-size:14px;font-weight:600;cursor:pointer;font-family:var(--font)">↺ Retry</button>
 </div>
 <style>@keyframes spin{to{transform:rotate(360deg)}}</style>
 
@@ -560,13 +561,7 @@ body { font-family:var(--font); background:var(--bg); color:var(--text-primary);
 <div class="modal-overlay" id="modal-habit-history">
   <div class="modal">
     <div class="modal-head"><h3>Habit history</h3><button class="modal-close" onclick="closeModal('habit-history')">✕</button></div>
-    <p style="font-size:13px;color:var(--text-muted);margin-bottom:1rem">Full history loads from Supabase when connected.</p>
-    <div style="display:flex;flex-direction:column">
-      <div style="display:flex;justify-content:space-between;padding:0.6rem 0;border-bottom:1px solid var(--border-soft);font-size:13px"><span style="color:var(--text-muted)">May 9</span><span style="color:var(--accent)">✓ Done</span></div>
-      <div style="display:flex;justify-content:space-between;padding:0.6rem 0;border-bottom:1px solid var(--border-soft);font-size:13px"><span style="color:var(--text-muted)">May 8</span><span style="color:var(--danger)">✗ Missed</span></div>
-      <div style="display:flex;justify-content:space-between;padding:0.6rem 0;border-bottom:1px solid var(--border-soft);font-size:13px"><span style="color:var(--text-muted)">May 7</span><span style="color:var(--accent)">✓ Done</span></div>
-      <div style="display:flex;justify-content:space-between;padding:0.6rem 0;font-size:13px"><span style="color:var(--text-muted)">May 6</span><span style="color:var(--accent)">✓ Done</span></div>
-    </div>
+    <div class="habit-history-body"></div>
     <div class="modal-actions"><button class="btn-ghost" onclick="closeModal('habit-history')">Close</button></div>
   </div>
 </div>
@@ -677,8 +672,8 @@ body { font-family:var(--font); background:var(--bg); color:var(--text-primary);
 // ═══════════════════════════════════════════════════════
 // SUPABASE CONFIG
 // ═══════════════════════════════════════════════════════
-const SUPA_URL  = 'https://zvolpbjkxinfkisghqut.supabase.co';
-const SUPA_KEY  = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp2b2xwYmpreGluZmtpc2docXV0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg0MDc1MTQsImV4cCI6MjA5Mzk4MzUxNH0.l7CQV36bdAEs7RiXA4gqE-HSQfP2_nyogLY7QnQoGuQ';
+const SUPA_URL = 'https://zvolpbjkxinfkisghqut.supabase.co';
+const SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp2b2xwYmpreGluZmtpc2docXV0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg0MDc1MTQsImV4cCI6MjA5Mzk4MzUxNH0.l7CQV36bdAEs7RiXA4gqE-HSQfP2_nyogLY7QnQoGuQ';
 
 async function sb(path, opts={}) {
   const res = await fetch(SUPA_URL + '/rest/v1/' + path, {
@@ -699,9 +694,7 @@ async function sb(path, opts={}) {
 // DATE HELPERS
 // ═══════════════════════════════════════════════════════
 function localDateStr(d) {
-  return d.getFullYear() + '-' +
-    String(d.getMonth()+1).padStart(2,'0') + '-' +
-    String(d.getDate()).padStart(2,'0');
+  return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
 }
 function formatTime(t) {
   if (!t) return '';
@@ -721,49 +714,50 @@ const tomorrowStr  = localDateStr(tomorrow);
 let tasks      = [];
 let categories = [];
 let habits     = [];
-let habitLogs  = {};   // { habitId: { date: status } }
+let habitLogs  = {};
 let friends    = [];
-let friendCalls= {};   // { friendId: [{id,call_date,note}] }
+let friendCalls= {};
 
 // ═══════════════════════════════════════════════════════
-// LOADING OVERLAY
+// LOADING OVERLAY  (Fix 4 — retry button)
 // ═══════════════════════════════════════════════════════
 function setLoading(on) {
   document.getElementById('loading-overlay').style.display = on ? 'flex' : 'none';
 }
 
 // ═══════════════════════════════════════════════════════
-// BOOTSTRAP — load everything from Supabase
+// BOOT
 // ═══════════════════════════════════════════════════════
 async function boot() {
   setLoading(true);
+  // Hide retry button if showing
+  const retryBtn = document.getElementById('retry-btn');
+  if (retryBtn) retryBtn.style.display = 'none';
   try {
+    // Fix 2: extended to 30 days so past week editing works
+    const thirtyAgo = localDateStr(new Date(today.getFullYear(), today.getMonth(), today.getDate()-30));
     const [cats, tks, habs, hLogs, frnds, fCalls] = await Promise.all([
       sb('categories?select=*&order=name'),
       sb('tasks?select=*,categories(name,color)&order=created_at.desc'),
       sb('habits?select=*&order=created_at&active=eq.true'),
-      sb('habit_logs?select=*&log_date=gte.' + localDateStr(new Date(today.getFullYear(), today.getMonth(), today.getDate()-13))),
+      sb('habit_logs?select=*&log_date=gte.' + thirtyAgo),
       sb('friends?select=*&order=name'),
       sb('friend_calls?select=*&order=call_date.desc'),
     ]);
-
     categories = cats || [];
-    tasks      = (tks || []).map(normaliseTask);
+    tasks      = (tks||[]).map(normaliseTask);
     habits     = habs || [];
-
-    habitLogs = {};
+    habitLogs  = {};
     (hLogs||[]).forEach(l => {
       if (!habitLogs[l.habit_id]) habitLogs[l.habit_id] = {};
       habitLogs[l.habit_id][l.log_date] = l.status;
     });
-
     friends = frnds || [];
     friendCalls = {};
     (fCalls||[]).forEach(c => {
       if (!friendCalls[c.friend_id]) friendCalls[c.friend_id] = [];
       friendCalls[c.friend_id].push(c);
     });
-
     populateCategoryDropdowns();
     renderAll();
     renderHabits();
@@ -772,6 +766,8 @@ async function boot() {
   } catch(e) {
     showToast('⚠ Could not connect to database');
     console.error(e);
+    // Fix 4: show retry button
+    if (retryBtn) retryBtn.style.display = 'inline-flex';
   }
   setLoading(false);
 }
@@ -794,19 +790,17 @@ function normaliseTask(t) {
 }
 
 // ═══════════════════════════════════════════════════════
-// CATEGORY DROPDOWNS — populate all selects dynamically
+// CATEGORY DROPDOWNS
 // ═══════════════════════════════════════════════════════
 function populateCategoryDropdowns() {
   const selects = ['modal-task-cat','edit-task-cat','preview-cat','filter-cat'];
   selects.forEach(sid => {
-    const sel = document.getElementById(sid);
-    if (!sel) return;
+    const sel = document.getElementById(sid); if (!sel) return;
     const isFilter = sid === 'filter-cat';
     sel.innerHTML = isFilter ? '<option value="">All categories</option>' : '';
     categories.forEach(c => {
       const o = document.createElement('option');
-      o.value = c.id;
-      o.textContent = c.name;
+      o.value = c.id; o.textContent = c.name;
       sel.appendChild(o);
     });
   });
@@ -839,14 +833,11 @@ function makeTaskEl(task, onToggle) {
   const div = document.createElement('div');
   div.className = 'task-item'+(task.done?' done':'');
   div.dataset.id = task.id;
-
   const check = document.createElement('div'); check.className = 'task-check';
   const dot   = document.createElement('div'); dot.className = 'priority-dot p-'+task.priority;
   const body  = document.createElement('div'); body.className = 'task-body';
   const titleEl = document.createElement('div'); titleEl.className = 'task-title'; titleEl.textContent = task.title;
   const meta  = document.createElement('div'); meta.className = 'task-meta';
-
-  // Category tag — use dynamic color from DB
   if (task.catName && task.catName !== 'General') {
     const tag = document.createElement('span');
     tag.className = 'tag';
@@ -861,21 +852,17 @@ function makeTaskEl(task, onToggle) {
     time.textContent = dl.text;
     meta.appendChild(time);
   }
-  // Recur badge
   if (task.recurInterval && task.recurUnit) {
     const recur = document.createElement('span');
     recur.className = 'tag';
     recur.style.cssText = 'background:var(--info-soft);color:var(--info);font-size:10px';
-    recur.textContent = '↻ every ' + task.recurInterval + ' ' + task.recurUnit;
+    recur.textContent = '↻ every '+task.recurInterval+' '+task.recurUnit;
     meta.appendChild(recur);
   }
-
   body.appendChild(titleEl); body.appendChild(meta);
-
   const editBtn = document.createElement('button');
   editBtn.className = 'task-edit-btn'; editBtn.innerHTML = '✏'; editBtn.title = 'Edit task';
   editBtn.addEventListener('click', ev => { ev.stopPropagation(); openEditTask(task.id); });
-
   div.appendChild(check); div.appendChild(dot); div.appendChild(body); div.appendChild(editBtn);
   div.addEventListener('click', () => toggleTask(task, div, onToggle));
   return div;
@@ -897,18 +884,12 @@ function renderToday() {
   document.getElementById('stat-overdue').textContent   = overdue.length;
   document.getElementById('today-due-count').textContent   = dueToday.length;
   document.getElementById('today-overdue-count').textContent = overdue.length;
-
   const dtList = document.getElementById('today-task-list');
   dtList.innerHTML = '';
-  dueToday.length === 0
-    ? (dtList.innerHTML = '<div class="empty-msg">Nothing due today 🎉</div>')
-    : dueToday.forEach(t => dtList.appendChild(makeTaskEl(t, renderAll)));
-
+  dueToday.length===0 ? (dtList.innerHTML='<div class="empty-msg">Nothing due today 🎉</div>') : dueToday.forEach(t=>dtList.appendChild(makeTaskEl(t,renderAll)));
   const ovList = document.getElementById('today-overdue-list');
   ovList.innerHTML = '';
-  overdue.length === 0
-    ? (ovList.innerHTML = '<div class="empty-msg">No overdue tasks ✓</div>')
-    : overdue.forEach(t => ovList.appendChild(makeTaskEl(t, renderAll)));
+  overdue.length===0 ? (ovList.innerHTML='<div class="empty-msg">No overdue tasks ✓</div>') : overdue.forEach(t=>ovList.appendChild(makeTaskEl(t,renderAll)));
 }
 
 function renderTasksPage() {
@@ -918,31 +899,158 @@ function renderTasksPage() {
   const hasFilter = catVal || dueVal || statusVal;
   document.getElementById('clear-filters-btn').style.display = hasFilter ? 'inline-flex' : 'none';
   document.querySelectorAll('.filter-select').forEach(s => s.classList.toggle('active-filter', !!s.value));
-
   let filtered = [...tasks];
   if (catVal)    filtered = filtered.filter(t => t.categoryId === catVal);
-  if (statusVal === 'active') filtered = filtered.filter(t => !t.done);
-  if (statusVal === 'done')   filtered = filtered.filter(t => t.done);
-  if (dueVal === 'overdue')   filtered = filtered.filter(t => isOverdue(t));
-  if (dueVal === 'today')     filtered = filtered.filter(t => isDueToday(t));
-  if (dueVal === 'upcoming')  filtered = filtered.filter(t => {
-    if (!t.dueDate) return false;
-    const d = new Date(t.dueDate+'T00:00:00'); d.setHours(0,0,0,0);
-    return d > today;
+  if (statusVal==='active') filtered = filtered.filter(t=>!t.done);
+  if (statusVal==='done')   filtered = filtered.filter(t=>t.done);
+  if (dueVal==='overdue')   filtered = filtered.filter(t=>isOverdue(t));
+  if (dueVal==='today')     filtered = filtered.filter(t=>isDueToday(t));
+  if (dueVal==='upcoming')  filtered = filtered.filter(t=>{
+    if(!t.dueDate)return false;
+    const d=new Date(t.dueDate+'T00:00:00');d.setHours(0,0,0,0);return d>today;
   });
-
-  const list  = document.getElementById('all-tasks');
-  const empty = document.getElementById('tasks-empty');
-  list.innerHTML = '';
-  if (filtered.length === 0) { empty.style.display='block'; }
-  else { empty.style.display='none'; filtered.forEach(t => list.appendChild(makeTaskEl(t, renderAll))); }
+  const list=document.getElementById('all-tasks');
+  const empty=document.getElementById('tasks-empty');
+  list.innerHTML='';
+  if(filtered.length===0){empty.style.display='block';}
+  else{empty.style.display='none';filtered.forEach(t=>list.appendChild(makeTaskEl(t,renderAll)));}
 }
 
 function updateBadges() {
-  const active = tasks.filter(t => !t.done).length;
-  const urgent = tasks.filter(t => !t.done && (isDueToday(t)||isOverdue(t))).length;
+  const active = tasks.filter(t=>!t.done).length;
+  const urgent = tasks.filter(t=>!t.done&&(isDueToday(t)||isOverdue(t))).length;
   document.getElementById('tasks-badge').textContent = active;
   document.getElementById('today-badge').textContent = urgent;
+}
+function clearFilters() {
+  ['filter-cat','filter-due','filter-status'].forEach(id=>document.getElementById(id).value='');
+  renderTasksPage();
+}
+function applyFilters() { renderTasksPage(); }
+
+// ═══════════════════════════════════════════════════════
+// TASK CRUD
+// ═══════════════════════════════════════════════════════
+async function toggleTask(task, div, onToggle) {
+  task.done = !task.done;
+  div.classList.toggle('done', task.done);
+  try {
+    await sb('tasks?id=eq.'+task.id, {
+      method:'PATCH',
+      body: JSON.stringify({ done: task.done, done_at: task.done ? new Date().toISOString() : null }),
+      prefer: 'return=minimal'
+    });
+    if (task.done && task.recurInterval && task.recurUnit) {
+      setTimeout(async () => {
+        const tks = await sb('tasks?select=*,categories(name,color)&order=created_at.desc');
+        tasks = (tks||[]).map(normaliseTask);
+        renderAll();
+        showToast('↻ Next occurrence created');
+      }, 800);
+    }
+  } catch(e) { task.done=!task.done; div.classList.toggle('done',task.done); showToast('⚠ Save failed'); }
+  if (onToggle) onToggle();
+  renderAll();
+}
+
+async function addTaskFromModal() {
+  const title = document.getElementById('modal-task-title').value.trim();
+  if (!title) { document.getElementById('modal-task-title').focus(); return; }
+  const catId    = document.getElementById('modal-task-cat').value || null;
+  const priority = document.getElementById('modal-task-priority').value;
+  const dueDate  = document.getElementById('modal-task-date').value || null;
+  const dueTime  = document.getElementById('modal-task-time').value || null;
+  const recurInterval = parseInt(document.getElementById('modal-task-recur-interval').value) || null;
+  const recurUnit     = document.getElementById('modal-task-recur-unit').value || null;
+  try {
+    const [row] = await sb('tasks', {
+      method:'POST',
+      body: JSON.stringify({ title, category_id:catId, priority, due_date:dueDate, due_time:dueTime, done:false,
+        recur_interval: recurInterval&&recurUnit ? recurInterval : null,
+        recur_unit: recurUnit||null }),
+      prefer:'return=representation'
+    });
+    const [full] = await sb('tasks?select=*,categories(name,color)&id=eq.'+row.id);
+    tasks.unshift(normaliseTask(full));
+    document.getElementById('modal-task-title').value='';
+    document.getElementById('modal-task-date').value='';
+    document.getElementById('modal-task-time').value='';
+    document.getElementById('modal-task-recur-interval').value='';
+    document.getElementById('modal-task-recur-unit').value='';
+    closeModal('add-task');
+    renderAll();
+    showToast('✓ Task added');
+  } catch(e) { showToast('⚠ Could not save task'); }
+}
+
+async function confirmNLPTask() {
+  const title = document.getElementById('preview-title').value.trim();
+  if (!title) { document.getElementById('preview-title').focus(); return; }
+  const catId    = document.getElementById('preview-cat').value || null;
+  const priority = document.getElementById('preview-priority').value;
+  const dueDate  = document.getElementById('preview-date').value || null;
+  const dueTime  = document.getElementById('preview-time').value || null;
+  try {
+    const [row] = await sb('tasks', {
+      method:'POST',
+      body: JSON.stringify({ title, category_id:catId, priority, due_date:dueDate, due_time:dueTime, done:false }),
+      prefer:'return=representation'
+    });
+    const [full] = await sb('tasks?select=*,categories(name,color)&id=eq.'+row.id);
+    tasks.unshift(normaliseTask(full));
+    closeModal('nlp-preview');
+    renderAll();
+    showToast('✓ Added: '+title);
+  } catch(e) { showToast('⚠ Could not save task'); }
+}
+
+let editingTaskId = null;
+function openEditTask(id) {
+  const t = tasks.find(x=>x.id===id); if(!t)return;
+  editingTaskId = id;
+  document.getElementById('edit-task-title').value    = t.title;
+  document.getElementById('edit-task-cat').value      = t.categoryId||'';
+  document.getElementById('edit-task-priority').value = t.priority||'med';
+  document.getElementById('edit-task-date').value     = t.dueDate||'';
+  document.getElementById('edit-task-time').value     = t.dueTime||'';
+  document.getElementById('edit-task-recur-interval').value = t.recurInterval||'';
+  document.getElementById('edit-task-recur-unit').value     = t.recurUnit||'';
+  openModal('edit-task');
+}
+async function saveEditedTask() {
+  const t = tasks.find(x=>x.id===editingTaskId); if(!t)return;
+  const title = document.getElementById('edit-task-title').value.trim();
+  if (!title) { document.getElementById('edit-task-title').focus(); return; }
+  const catId    = document.getElementById('edit-task-cat').value||null;
+  const priority = document.getElementById('edit-task-priority').value;
+  const dueDate  = document.getElementById('edit-task-date').value||null;
+  const dueTime  = document.getElementById('edit-task-time').value||null;
+  const recurInterval = parseInt(document.getElementById('edit-task-recur-interval').value)||null;
+  const recurUnit     = document.getElementById('edit-task-recur-unit').value||null;
+  try {
+    await sb('tasks?id=eq.'+editingTaskId, {
+      method:'PATCH',
+      body: JSON.stringify({ title, category_id:catId, priority, due_date:dueDate, due_time:dueTime,
+        recur_interval: recurInterval&&recurUnit ? recurInterval : null,
+        recur_unit: recurUnit||null }),
+      prefer:'return=minimal'
+    });
+    const [full] = await sb('tasks?select=*,categories(name,color)&id=eq.'+editingTaskId);
+    const idx = tasks.findIndex(x=>x.id===editingTaskId);
+    if(idx>=0) tasks[idx]=normaliseTask(full);
+    closeModal('edit-task');
+    renderAll();
+    showToast('✓ Task updated');
+  } catch(e) { showToast('⚠ Could not update task'); }
+}
+async function deleteTask() {
+  try {
+    await sb('tasks?id=eq.'+editingTaskId, {method:'DELETE',prefer:'return=minimal'});
+    tasks = tasks.filter(x=>x.id!==editingTaskId);
+    closeModal('edit-task');
+    renderAll();
+    showToast('🗑 Task deleted');
+  } catch(e) { showToast('⚠ Could not delete task'); }
 }
 
 // ═══════════════════════════════════════════════════════
@@ -984,216 +1092,42 @@ document.querySelectorAll('.modal-overlay').forEach(m=>{
   m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('open');});
 });
 
-function clearFilters() {
-  ['filter-cat','filter-due','filter-status'].forEach(id => document.getElementById(id).value='');
-  renderTasksPage();
-}
-function applyFilters() { renderTasksPage(); }
-
-// ═══════════════════════════════════════════════════════
-// TASK CRUD
-// ═══════════════════════════════════════════════════════
-async function toggleTask(task, div, onToggle) {
-  task.done = !task.done;
-  div.classList.toggle('done', task.done);
-  try {
-    await sb('tasks?id=eq.'+task.id, {
-      method:'PATCH',
-      body: JSON.stringify({ done: task.done, done_at: task.done ? new Date().toISOString() : null }),
-      prefer: 'return=minimal'
-    });
-    // If recurring task just completed, reload tasks so new occurrence appears
-    if (task.done && task.recurInterval && task.recurUnit) {
-      setTimeout(async () => {
-        const tks = await sb('tasks?select=*,categories(name,color)&order=created_at.desc');
-        tasks = (tks||[]).map(normaliseTask);
-        renderAll();
-        showToast('↻ Next occurrence created');
-      }, 800);
-    }
-  } catch(e) { task.done = !task.done; div.classList.toggle('done', task.done); showToast('⚠ Save failed'); }
-  if (onToggle) onToggle();
-  renderAll();
-}
-
-async function addTaskFromModal() {
-  const title = document.getElementById('modal-task-title').value.trim();
-  if (!title) { document.getElementById('modal-task-title').focus(); return; }
-  const catId    = document.getElementById('modal-task-cat').value || null;
-  const priority = document.getElementById('modal-task-priority').value;
-  const dueDate  = document.getElementById('modal-task-date').value || null;
-  const dueTime  = document.getElementById('modal-task-time').value || null;
-  const recurInterval = parseInt(document.getElementById('modal-task-recur-interval').value) || null;
-  const recurUnit     = document.getElementById('modal-task-recur-unit').value || null;
-  try {
-    const [row] = await sb('tasks', {
-      method:'POST',
-      body: JSON.stringify({ title, category_id:catId, priority, due_date:dueDate, due_time:dueTime, done:false,
-        recur_interval: recurInterval && recurUnit ? recurInterval : null,
-        recur_unit: recurUnit || null }),
-      prefer:'return=representation'
-    });
-    const [full] = await sb('tasks?select=*,categories(name,color)&id=eq.'+row.id);
-    tasks.unshift(normaliseTask(full));
-    document.getElementById('modal-task-title').value='';
-    document.getElementById('modal-task-date').value='';
-    document.getElementById('modal-task-time').value='';
-    document.getElementById('modal-task-recur-interval').value='';
-    document.getElementById('modal-task-recur-unit').value='';
-    closeModal('add-task');
-    renderAll();
-    showToast('✓ Task added');
-  } catch(e) { showToast('⚠ Could not save task'); }
-}
-
-async function confirmNLPTask() {
-  const title = document.getElementById('preview-title').value.trim();
-  if (!title) { document.getElementById('preview-title').focus(); return; }
-  const catId    = document.getElementById('preview-cat').value || null;
-  const priority = document.getElementById('preview-priority').value;
-  const dueDate  = document.getElementById('preview-date').value || null;
-  const dueTime  = document.getElementById('preview-time').value || null;
-  try {
-    const [row] = await sb('tasks', {
-      method:'POST',
-      body: JSON.stringify({ title, category_id:catId, priority, due_date:dueDate, due_time:dueTime, done:false }),
-      prefer:'return=representation'
-    });
-    const [full] = await sb('tasks?select=*,categories(name,color)&id=eq.'+row.id);
-    tasks.unshift(normaliseTask(full));
-    closeModal('nlp-preview');
-    renderAll();
-    showToast('✓ Added: '+title);
-  } catch(e) { showToast('⚠ Could not save task'); }
-}
-
-let editingTaskId = null;
-function openEditTask(id) {
-  const t = tasks.find(x => x.id === id); if (!t) return;
-  editingTaskId = id;
-  document.getElementById('edit-task-title').value    = t.title;
-  document.getElementById('edit-task-cat').value      = t.categoryId || '';
-  document.getElementById('edit-task-priority').value = t.priority || 'med';
-  document.getElementById('edit-task-date').value     = t.dueDate || '';
-  document.getElementById('edit-task-time').value     = t.dueTime || '';
-  document.getElementById('edit-task-recur-interval').value = t.recurInterval || '';
-  document.getElementById('edit-task-recur-unit').value     = t.recurUnit || '';
-  openModal('edit-task');
-}
-async function saveEditedTask() {
-  const t = tasks.find(x => x.id === editingTaskId); if (!t) return;
-  const title = document.getElementById('edit-task-title').value.trim();
-  if (!title) { document.getElementById('edit-task-title').focus(); return; }
-  const catId    = document.getElementById('edit-task-cat').value || null;
-  const priority = document.getElementById('edit-task-priority').value;
-  const dueDate  = document.getElementById('edit-task-date').value || null;
-  const dueTime  = document.getElementById('edit-task-time').value || null;
-  const recurInterval = parseInt(document.getElementById('edit-task-recur-interval').value) || null;
-  const recurUnit     = document.getElementById('edit-task-recur-unit').value || null;
-  try {
-    await sb('tasks?id=eq.'+editingTaskId, {
-      method:'PATCH',
-      body: JSON.stringify({ title, category_id:catId, priority, due_date:dueDate, due_time:dueTime,
-        recur_interval: recurInterval && recurUnit ? recurInterval : null,
-        recur_unit: recurUnit || null }),
-      prefer:'return=minimal'
-    });
-    const [full] = await sb('tasks?select=*,categories(name,color)&id=eq.'+editingTaskId);
-    const idx = tasks.findIndex(x => x.id === editingTaskId);
-    if (idx >= 0) tasks[idx] = normaliseTask(full);
-    closeModal('edit-task');
-    renderAll();
-    showToast('✓ Task updated');
-  } catch(e) { showToast('⚠ Could not update task'); }
-}
-async function deleteTask() {
-  try {
-    await sb('tasks?id=eq.'+editingTaskId, { method:'DELETE', prefer:'return=minimal' });
-    tasks = tasks.filter(x => x.id !== editingTaskId);
-    closeModal('edit-task');
-    renderAll();
-    showToast('🗑 Task deleted');
-  } catch(e) { showToast('⚠ Could not delete task'); }
-}
-
-async function addTaskFromModal() {
-  const title = document.getElementById('modal-task-title').value.trim();
-  if (!title) { document.getElementById('modal-task-title').focus(); return; }
-  const catId    = document.getElementById('modal-task-cat').value || null;
-  const priority = document.getElementById('modal-task-priority').value;
-  const dueDate  = document.getElementById('modal-task-date').value || null;
-  const dueTime  = document.getElementById('modal-task-time').value || null;
-  const recurInterval = parseInt(document.getElementById('modal-task-recur-interval').value) || null;
-  const recurUnit     = document.getElementById('modal-task-recur-unit').value || null;
-  try {
-    const [row] = await sb('tasks', {
-      method:'POST',
-      body: JSON.stringify({ title, category_id:catId, priority, due_date:dueDate, due_time:dueTime, done:false,
-        recur_interval: recurInterval && recurUnit ? recurInterval : null,
-        recur_unit: recurUnit || null }),
-      prefer:'return=representation'
-    });
-    const [full] = await sb('tasks?select=*,categories(name,color)&id=eq.'+row.id);
-    tasks.unshift(normaliseTask(full));
-    document.getElementById('modal-task-title').value='';
-    document.getElementById('modal-task-date').value='';
-    document.getElementById('modal-task-time').value='';
-    document.getElementById('modal-task-recur-interval').value='';
-    document.getElementById('modal-task-recur-unit').value='';
-    closeModal('add-task');
-    renderAll();
-    showToast('✓ Task added');
-  } catch(e) { showToast('⚠ Could not save task'); }
-}
-
 // ═══════════════════════════════════════════════════════
 // HABITS
 // ═══════════════════════════════════════════════════════
 function renderHabits() {
-  const container = document.getElementById('habits-list');
-  if (!container) return;
-  container.innerHTML = '';
-
-  // Also render today's habits section
+  const container = document.getElementById('habits-list'); if(!container)return;
+  container.innerHTML='';
   const todayHabits = document.getElementById('today-habits-list');
-  if (todayHabits) todayHabits.innerHTML = '';
-
-  if (habits.length === 0) {
-    container.innerHTML = '<div class="empty-msg">No habits yet. Add one above!</div>';
-    return;
-  }
-
-  habits.forEach(h => {
-    const logs = habitLogs[h.id] || {};
-    const initial = h.name.trim()[0].toUpperCase();
-    // Build 7-day week card
-    const card = document.createElement('div'); card.className='habit-card';
-    const top  = document.createElement('div'); top.className='habit-card-top';
-    const icon = document.createElement('div');
+  if(todayHabits)todayHabits.innerHTML='';
+  if(habits.length===0){container.innerHTML='<div class="empty-msg">No habits yet. Add one above!</div>';return;}
+  habits.forEach(h=>{
+    const logs=habitLogs[h.id]||{};
+    const initial=h.name.trim()[0].toUpperCase();
+    const card=document.createElement('div'); card.className='habit-card';
+    const top=document.createElement('div'); top.className='habit-card-top';
+    const icon=document.createElement('div');
     icon.className='habit-icon-wrap hi-green';
     icon.style.cssText='font-size:15px;font-weight:600;font-family:var(--font)';
     icon.textContent=initial;
-    const info = document.createElement('div'); info.className='habit-info';
+    const info=document.createElement('div'); info.className='habit-info';
     const DAY_NAMES=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
     const planned=h.planned_days||[];
     const freqLabel=planned.length>0?planned.map(d=>DAY_NAMES[d]).join(', '):'Daily';
     info.innerHTML=`<div class="habit-name">${h.name}</div><div class="habit-freq">${freqLabel}</div>`;
-    const streak = document.createElement('div'); streak.className='streak-pill'; streak.textContent='🔥 '+calcStreak(h,logs);
-    const editBtn= document.createElement('button'); editBtn.className='history-btn'; editBtn.textContent='Edit';
+    const streak=document.createElement('div'); streak.className='streak-pill'; streak.textContent='🔥 '+calcStreak(h,logs);
+    const editBtn=document.createElement('button'); editBtn.className='history-btn'; editBtn.textContent='Edit';
     editBtn.onclick=()=>openEditHabit(h.id);
-    const histBtn= document.createElement('button'); histBtn.className='history-btn'; histBtn.textContent='History';
+    const histBtn=document.createElement('button'); histBtn.className='history-btn'; histBtn.textContent='History';
     histBtn.onclick=()=>openHabitHistory(h.id);
     top.append(icon,info,streak,editBtn,histBtn); card.appendChild(top);
-
     const weekDiv=document.createElement('div'); weekDiv.className='habit-week'; weekDiv.id='hw-'+h.id;
     card.appendChild(weekDiv);
     container.appendChild(card);
-    buildHabitWeek('hw-'+h.id, h, logs);
-
-    // Today's habits row
-    if (todayHabits) {
-      const todayLog = logs[todayStr];
-      const row = document.createElement('div');
+    buildHabitWeek('hw-'+h.id,h,logs);
+    if(todayHabits){
+      const todayLog=logs[todayStr];
+      const row=document.createElement('div');
       row.className='task-item'; row.style.cssText='align-items:center;gap:10px';
       const avatarEl=document.createElement('div');
       avatarEl.style.cssText='width:32px;height:32px;border-radius:8px;background:var(--accent-soft);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:600;color:var(--accent);flex-shrink:0';
@@ -1203,7 +1137,7 @@ function renderHabits() {
       const btn=document.createElement('button');
       btn.className='btn-sm '+(todayLog==='done'?'btn-sm-ghost':'btn-sm-accent');
       btn.textContent=todayLog==='done'?'✓ Done':'Log';
-      if (todayLog==='done'){btn.style.opacity='0.6';btn.disabled=true;}
+      if(todayLog==='done'){btn.style.opacity='0.6';btn.disabled=true;}
       btn.onclick=()=>logHabitToday(h.id,btn);
       row.append(avatarEl,body,btn);
       todayHabits.appendChild(row);
@@ -1211,17 +1145,29 @@ function renderHabits() {
   });
 }
 
-function isPlannedToday(h) {
-  const dow=(new Date().getDay()+6)%7; // 0=Mon
-  return !h.planned_days || h.planned_days.includes(dow);
+function isPlannedToday(h){
+  const dow=(new Date().getDay()+6)%7;
+  return !h.planned_days||h.planned_days.includes(dow);
 }
 
+// Fix 3: correct streak logic
 function calcStreak(h, logs) {
-  let streak=0, d=new Date(today);
-  for (let i=0;i<60;i++) {
-    const ds=localDateStr(d);
-    if (logs[ds]==='done') streak++;
-    else if (i>0) break;
+  const planned = h.planned_days || [0,1,2,3,4,5,6];
+  let streak = 0;
+  let d = new Date(today);
+  const todayDowLocal = (new Date().getDay()+6)%7;
+  // If today is planned but not yet logged, skip today — don't break streak
+  if (planned.includes(todayDowLocal) && !logs[localDateStr(d)]) {
+    d.setDate(d.getDate()-1);
+  }
+  for (let i=0; i<90; i++) {
+    const ds  = localDateStr(d);
+    const dow = (d.getDay()+6)%7;
+    if (planned.includes(dow)) {
+      if (logs[ds]==='done') { streak++; }
+      else { break; } // Planned but not done — break streak
+    }
+    // Not a planned day — skip silently
     d.setDate(d.getDate()-1);
   }
   return streak;
@@ -1238,22 +1184,17 @@ function buildHabitWeek(containerId, habit, logs) {
     const col=document.createElement('div'); col.className='hw-col';
     const lbl=document.createElement('div'); lbl.className='hw-label'; lbl.textContent=label;
     const cell=document.createElement('div'); cell.className='hw-cell';
-
-    // Get date for this column (Mon=0 of current week)
     const cellDate=new Date(today);
     cellDate.setDate(today.getDate()-(todayDow-i));
     const cellDateStr=localDateStr(cellDate);
     const status=logs[cellDateStr]||'';
     const isPlanned=planned.includes(i);
-
-    if(!isPlanned) cell.classList.add('not-planned');
-    else           cell.classList.add('planned');
-    if(status==='done')   {cell.classList.add('planned-done');   cell.textContent='✓';}
-    if(status==='missed') {cell.classList.add('planned-missed'); cell.textContent='✗';}
-    if(i===todayDow) cell.classList.add('is-today');
-    if(status==='done'&&!isPlanned) cell.classList.add('not-planned-done');
-
-    // Dropdown for all cells
+    if(!isPlanned)cell.classList.add('not-planned');
+    else cell.classList.add('planned');
+    if(status==='done'){cell.classList.add('planned-done');cell.textContent='✓';}
+    if(status==='missed'){cell.classList.add('planned-missed');cell.textContent='✗';}
+    if(i===todayDow)cell.classList.add('is-today');
+    if(status==='done'&&!isPlanned)cell.classList.add('not-planned-done');
     const dd=document.createElement('div'); dd.className='hw-dropdown';
     dd.innerHTML='<button class="hw-drop-item" data-s="done">✓ &nbsp;Completed</button><button class="hw-drop-item" data-s="missed">✗ &nbsp;Not completed</button><button class="hw-drop-item" data-s="clear">— &nbsp;Clear</button>';
     dd.querySelectorAll('.hw-drop-item').forEach(btn=>{
@@ -1278,107 +1219,122 @@ document.addEventListener('click',()=>document.querySelectorAll('.hw-dropdown').
 
 async function saveHabitLog(habitId, dateStr, status) {
   try {
-    if (status==='clear') {
-      await sb('habit_logs?habit_id=eq.'+habitId+'&log_date=eq.'+dateStr, {method:'DELETE',prefer:'return=minimal'});
-      if (habitLogs[habitId]) delete habitLogs[habitId][dateStr];
+    if(status==='clear'){
+      await sb('habit_logs?habit_id=eq.'+habitId+'&log_date=eq.'+dateStr,{method:'DELETE',prefer:'return=minimal'});
+      if(habitLogs[habitId])delete habitLogs[habitId][dateStr];
     } else {
-      await sb('habit_logs', {
+      await sb('habit_logs',{
         method:'POST',
-        body:JSON.stringify({habit_id:habitId, log_date:dateStr, status}),
+        body:JSON.stringify({habit_id:habitId,log_date:dateStr,status}),
         prefer:'resolution=merge-duplicates,return=minimal'
       });
-      if (!habitLogs[habitId]) habitLogs[habitId]={};
+      if(!habitLogs[habitId])habitLogs[habitId]={};
       habitLogs[habitId][dateStr]=status;
     }
     renderHabits();
     showToast(status==='done'?'✓ Logged':'✗ Marked missed');
-  } catch(e) { showToast('⚠ Could not save'); }
+  } catch(e){showToast('⚠ Could not save');}
 }
 
-async function logHabitToday(habitId, btn) {
-  await saveHabitLog(habitId, todayStr, 'done');
+async function logHabitToday(habitId,btn){
+  await saveHabitLog(habitId,todayStr,'done');
   btn.textContent='✓ Done'; btn.disabled=true; btn.style.opacity='0.6';
 }
 
-// ── Day button toggle logic ──
-function initDayBtns(containerId) {
-  document.querySelectorAll('#'+containerId+' .day-btn').forEach(btn => {
-    btn.addEventListener('click', () => btn.classList.toggle('selected'));
+// Day button toggle
+function initDayBtns(containerId){
+  document.querySelectorAll('#'+containerId+' .day-btn').forEach(btn=>{
+    btn.addEventListener('click',()=>btn.classList.toggle('selected'));
   });
 }
-function getSelectedDays(containerId) {
-  const selected = [];
-  document.querySelectorAll('#'+containerId+' .day-btn.selected').forEach(btn => {
-    selected.push(parseInt(btn.dataset.day));
-  });
+function getSelectedDays(containerId){
+  const selected=[];
+  document.querySelectorAll('#'+containerId+' .day-btn.selected').forEach(btn=>selected.push(parseInt(btn.dataset.day)));
   return selected;
 }
-function setSelectedDays(containerId, days) {
-  document.querySelectorAll('#'+containerId+' .day-btn').forEach(btn => {
-    btn.classList.toggle('selected', days.includes(parseInt(btn.dataset.day)));
+function setSelectedDays(containerId,days){
+  document.querySelectorAll('#'+containerId+' .day-btn').forEach(btn=>{
+    btn.classList.toggle('selected',days.includes(parseInt(btn.dataset.day)));
   });
 }
 initDayBtns('add-habit-days');
 initDayBtns('edit-habit-days');
 
-async function addHabitFromModal() {
+async function addHabitFromModal(){
   const name=document.getElementById('add-habit-name').value.trim();
   if(!name){document.getElementById('add-habit-name').focus();return;}
   const plannedDays=getSelectedDays('add-habit-days');
   if(plannedDays.length===0){showToast('Please select at least one day');return;}
-  // frequency_days = 1 always since days control the schedule
-  try {
+  try{
     const [row]=await sb('habits',{method:'POST',body:JSON.stringify({name,frequency_days:1,planned_days:plannedDays,active:true}),prefer:'return=representation'});
-    habits.push(row);
-    habitLogs[row.id]={};
+    habits.push(row); habitLogs[row.id]={};
     document.getElementById('add-habit-name').value='';
     setSelectedDays('add-habit-days',[]);
-    closeModal('add-habit');
-    renderHabits();
-    showToast('✓ Habit added');
-  } catch(e){showToast('⚠ Could not save habit');}
+    closeModal('add-habit'); renderHabits(); showToast('✓ Habit added');
+  }catch(e){showToast('⚠ Could not save habit');}
 }
 
 let editingHabitId=null;
-function openEditHabit(id) {
+function openEditHabit(id){
   const h=habits.find(x=>x.id===id); if(!h)return;
   editingHabitId=id;
   document.getElementById('edit-habit-name').value=h.name;
-  setSelectedDays('edit-habit-days', h.planned_days||[]);
+  setSelectedDays('edit-habit-days',h.planned_days||[]);
   openModal('edit-habit');
 }
-async function saveEditedHabit() {
+async function saveEditedHabit(){
   const h=habits.find(x=>x.id===editingHabitId); if(!h)return;
   const name=document.getElementById('edit-habit-name').value.trim();
   if(!name){document.getElementById('edit-habit-name').focus();return;}
   const plannedDays=getSelectedDays('edit-habit-days');
   if(plannedDays.length===0){showToast('Please select at least one day');return;}
-  try {
+  try{
     await sb('habits?id=eq.'+editingHabitId,{method:'PATCH',body:JSON.stringify({name,planned_days:plannedDays}),prefer:'return=minimal'});
     h.name=name; h.planned_days=plannedDays;
-    closeModal('edit-habit');
-    renderHabits();
-    showToast('✓ Habit updated');
-  } catch(e){showToast('⚠ Could not update habit');}
+    closeModal('edit-habit'); renderHabits(); showToast('✓ Habit updated');
+  }catch(e){showToast('⚠ Could not update habit');}
 }
-async function deleteHabit() {
-  try {
+async function deleteHabit(){
+  try{
     await sb('habits?id=eq.'+editingHabitId,{method:'PATCH',body:JSON.stringify({active:false}),prefer:'return=minimal'});
     habits=habits.filter(x=>x.id!==editingHabitId);
-    closeModal('edit-habit');
-    renderHabits();
-    showToast('🗑 Habit removed');
-  } catch(e){showToast('⚠ Could not delete habit');}
+    closeModal('edit-habit'); renderHabits(); showToast('🗑 Habit removed');
+  }catch(e){showToast('⚠ Could not delete habit');}
 }
 
-function openHabitHistory(habitId) {
+// Fix 4: habit history loads real data from habitLogs
+function openHabitHistory(habitId){
+  const h=habits.find(x=>x.id===habitId);
+  const modal=document.getElementById('modal-habit-history');
+  const head=modal.querySelector('h3');
+  if(head&&h)head.textContent=h.name+' — history';
+  const body=modal.querySelector('.habit-history-body');
+  if(body){
+    body.innerHTML='';
+    const logs=habitLogs[habitId]||{};
+    const entries=Object.entries(logs).sort((a,b)=>b[0].localeCompare(a[0]));
+    if(entries.length===0){
+      body.innerHTML='<p style="font-size:13px;color:var(--text-muted);padding:.5rem 0">No history yet.</p>';
+    } else {
+      entries.forEach(([date,status],i)=>{
+        const d=new Date(date+'T00:00:00');
+        const row=document.createElement('div');
+        row.style.cssText='display:flex;justify-content:space-between;padding:.55rem 0;'+(i<entries.length-1?'border-bottom:1px solid var(--border-soft)':'');
+        const label=d.toLocaleDateString('en-GB',{weekday:'short',day:'numeric',month:'short'});
+        const statusColor=status==='done'?'var(--accent)':'var(--danger)';
+        const statusText=status==='done'?'✓ Done':'✗ Missed';
+        row.innerHTML=`<span style="font-size:13px;color:var(--text-muted)">${label}</span><span style="font-size:13px;font-weight:500;color:${statusColor}">${statusText}</span>`;
+        body.appendChild(row);
+      });
+    }
+  }
   openModal('habit-history');
 }
 
 // ═══════════════════════════════════════════════════════
 // FRIENDS
 // ═══════════════════════════════════════════════════════
-function renderFriends() {
+function renderFriends(){
   const container=document.getElementById('friends-list'); if(!container)return;
   container.innerHTML='';
   if(friends.length===0){container.innerHTML='<div class="empty-msg">No friends added yet.</div>';return;}
@@ -1393,27 +1349,18 @@ function renderFriends() {
     else if(daysUntilDue<0){badgeText='Overdue';badgeClass='badge-not';}
     else if(daysUntilDue<=3){badgeText='Due in '+daysUntilDue+'d';badgeClass='badge-soon';}
     else{badgeText='Next: '+daysUntilDue+'d';badgeClass='badge-ok';}
-
-    const metaText = lastCallDate
-      ? (daysSince===0?'Today':daysSince+' days ago')+' · every '+f.frequency_days+' days'
-      : 'Never called · every '+f.frequency_days+' days';
-
+    const metaText=lastCallDate?(daysSince===0?'Today':daysSince+' days ago')+' · every '+f.frequency_days+' days':'Never called · every '+f.frequency_days+' days';
     const initials=(f.initials||(f.name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase()));
     const card=document.createElement('div'); card.className='friend-card';
-    card.innerHTML=`
-      <div class="friend-row">
-        <div class="friend-avatar" style="background:${f.avatar_color||'var(--accent-soft)'};color:${f.avatar_text_color||'var(--accent)'}">${initials}</div>
-        <div class="friend-info">
-          <div class="friend-name">${f.name}</div>
-          <div class="friend-meta" id="fmeta-${f.id}">${metaText}</div>
-        </div>
-        <span class="friend-badge ${badgeClass}" id="fbadge-${f.id}">${badgeText}</span>
-        <div class="friend-btns">
-          <button class="friend-icon-btn call-btn" title="Log call">📞</button>
-          <button class="friend-icon-btn" title="History">📋</button>
-          <button class="friend-icon-btn" title="Settings">⚙</button>
-        </div>
-      </div>`;
+    card.innerHTML=`<div class="friend-row">
+      <div class="friend-avatar" style="background:${f.avatar_color||'var(--accent-soft)'};color:${f.avatar_text_color||'var(--accent)'}">${initials}</div>
+      <div class="friend-info"><div class="friend-name">${f.name}</div><div class="friend-meta" id="fmeta-${f.id}">${metaText}</div></div>
+      <span class="friend-badge ${badgeClass}" id="fbadge-${f.id}">${badgeText}</span>
+      <div class="friend-btns">
+        <button class="friend-icon-btn call-btn" title="Log call">📞</button>
+        <button class="friend-icon-btn" title="History">📋</button>
+        <button class="friend-icon-btn" title="Settings">⚙</button>
+      </div></div>`;
     const [callBtn,histBtn,settBtn]=card.querySelectorAll('.friend-icon-btn');
     callBtn.onclick=()=>logFriendCall(f.id,callBtn);
     histBtn.onclick=()=>showFriendHistory(f.id);
@@ -1422,33 +1369,30 @@ function renderFriends() {
   });
 }
 
-async function addFriendFromModal() {
+async function addFriendFromModal(){
   const name=document.getElementById('add-friend-name').value.trim();
   if(!name){document.getElementById('add-friend-name').focus();return;}
   const freq=parseInt(document.getElementById('add-friend-freq').value)||7;
   const initials=name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
-  try {
+  try{
     const [row]=await sb('friends',{method:'POST',body:JSON.stringify({name,initials,frequency_days:freq}),prefer:'return=representation'});
     friends.push(row); friendCalls[row.id]=[];
     document.getElementById('add-friend-name').value='';
-    closeModal('add-friend');
-    renderFriends();
-    showToast('✓ Friend added');
-  } catch(e){showToast('⚠ Could not save');}
+    closeModal('add-friend'); renderFriends(); showToast('✓ Friend added');
+  }catch(e){showToast('⚠ Could not save');}
 }
 
-async function logFriendCall(friendId, btn) {
-  try {
+async function logFriendCall(friendId,btn){
+  try{
     const [row]=await sb('friend_calls',{method:'POST',body:JSON.stringify({friend_id:friendId,call_date:todayStr,note:''}),prefer:'return=representation'});
     if(!friendCalls[friendId])friendCalls[friendId]=[];
     friendCalls[friendId].unshift(row);
-    renderFriends();
-    showToast('📞 Call logged');
-  } catch(e){showToast('⚠ Could not log call');}
+    renderFriends(); showToast('📞 Call logged');
+  }catch(e){showToast('⚠ Could not log call');}
 }
 
 let currentHistoryFriendId=null;
-function showFriendHistory(id) {
+function showFriendHistory(id){
   currentHistoryFriendId=id;
   const f=friends.find(x=>x.id===id);
   document.getElementById('friend-history-name').textContent=(f?f.name:'Friend')+' — call history';
@@ -1456,12 +1400,10 @@ function showFriendHistory(id) {
   openModal('friend-history');
 }
 
-function renderFriendHistoryBody(id) {
+function renderFriendHistoryBody(id){
   const calls=friendCalls[id]||[];
   const body=document.getElementById('friend-history-body');
   body.innerHTML='';
-
-  // Week dots
   const weekWrap=document.createElement('div'); weekWrap.style.cssText='margin-bottom:1rem';
   const wl=document.createElement('div'); wl.style.cssText='font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted);margin-bottom:6px'; wl.textContent='Last 8 weeks';
   weekWrap.appendChild(wl);
@@ -1479,18 +1421,14 @@ function renderFriendHistoryBody(id) {
     dotRow.appendChild(dot);
   }
   weekWrap.appendChild(dotRow); body.appendChild(weekWrap);
-
   const divEl=document.createElement('div'); divEl.style.cssText='height:1px;background:var(--border-soft);margin-bottom:.75rem'; body.appendChild(divEl);
-
   const headerRow=document.createElement('div'); headerRow.style.cssText='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px';
   const logLabel=document.createElement('div'); logLabel.style.cssText='font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted)'; logLabel.textContent='Call log';
   const addBtn=document.createElement('button');
   addBtn.style.cssText='background:var(--accent);color:#fff;border:none;border-radius:6px;padding:3px 10px;font-size:12px;font-weight:500;cursor:pointer;font-family:var(--font)';
   addBtn.textContent='+ Add entry'; addBtn.onclick=()=>showCallEntryForm(id,-1);
   headerRow.appendChild(logLabel); headerRow.appendChild(addBtn); body.appendChild(headerRow);
-
   if(calls.length===0){const e=document.createElement('p');e.style.cssText='font-size:13px;color:var(--text-muted);padding:.5rem 0';e.textContent='No calls logged yet.';body.appendChild(e);return;}
-
   calls.forEach((c,i)=>{
     const d=new Date(c.call_date+'T00:00:00');
     const isT=c.call_date===todayStr;
@@ -1512,15 +1450,14 @@ function renderFriendHistoryBody(id) {
       try{
         await sb('friend_calls?id=eq.'+c.id,{method:'DELETE',prefer:'return=minimal'});
         friendCalls[id].splice(i,1);
-        renderFriendHistoryBody(id);
-        showToast('Entry deleted');
+        renderFriendHistoryBody(id); showToast('Entry deleted');
       }catch(e){showToast('⚠ Could not delete');}
     };
     row.append(left,badge,editBtn,delBtn); body.appendChild(row);
   });
 }
 
-function showCallEntryForm(friendId,entryIndex) {
+function showCallEntryForm(friendId,entryIndex){
   const calls=friendCalls[friendId]||[];
   const isNew=entryIndex===-1;
   const existing=isNew?null:calls[entryIndex];
@@ -1528,8 +1465,7 @@ function showCallEntryForm(friendId,entryIndex) {
   const body=document.getElementById('friend-history-body');
   const form=document.createElement('div'); form.id='call-entry-form';
   form.style.cssText='background:var(--surface-alt);border:1px solid var(--border);border-radius:10px;padding:.875rem;margin-bottom:.875rem';
-  form.innerHTML=`
-    <div style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:.625rem">${isNew?'Add call entry':'Edit call entry'}</div>
+  form.innerHTML=`<div style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:.625rem">${isNew?'Add call entry':'Edit call entry'}</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
       <div><div style="font-size:10px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">Date</div>
         <input type="date" id="ce-date" style="width:100%;padding:.45rem .625rem;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:var(--font);background:var(--surface);color:var(--text-primary);outline:none" value="${existing?existing.call_date:todayStr}" /></div>
@@ -1544,13 +1480,13 @@ function showCallEntryForm(friendId,entryIndex) {
   document.getElementById('ce-date').focus();
 }
 
-async function saveCallEntry(friendId,entryIndex) {
+async function saveCallEntry(friendId,entryIndex){
   const date=document.getElementById('ce-date').value;
   const note=document.getElementById('ce-note').value.trim();
   if(!date){showToast('Please pick a date');return;}
   const calls=friendCalls[friendId]||[];
   const isNew=entryIndex===-1;
-  try {
+  try{
     if(isNew){
       const [row]=await sb('friend_calls',{method:'POST',body:JSON.stringify({friend_id:friendId,call_date:date,note}),prefer:'return=representation'});
       calls.unshift(row);
@@ -1560,10 +1496,9 @@ async function saveCallEntry(friendId,entryIndex) {
       calls[entryIndex]={...existing,call_date:date,note};
     }
     friendCalls[friendId]=calls.sort((a,b)=>b.call_date.localeCompare(a.call_date));
-    renderFriendHistoryBody(friendId);
-    renderFriends();
+    renderFriendHistoryBody(friendId); renderFriends();
     showToast(isNew?'✓ Entry added':'✓ Entry updated');
-  } catch(e){showToast('⚠ Could not save');}
+  }catch(e){showToast('⚠ Could not save');}
 }
 
 let editingFriendId=null;
@@ -1580,16 +1515,14 @@ async function saveFriendSettings(){
   try{
     await sb('friends?id=eq.'+editingFriendId,{method:'PATCH',body:JSON.stringify({frequency_days:freq}),prefer:'return=minimal'});
     f.frequency_days=freq;
-    closeModal('friend-settings');
-    renderFriends();
-    showToast('✓ Settings saved');
+    closeModal('friend-settings'); renderFriends(); showToast('✓ Settings saved');
   }catch(e){showToast('⚠ Could not save');}
 }
 
 // ═══════════════════════════════════════════════════════
-// CATEGORIES (Settings)
+// CATEGORIES
 // ═══════════════════════════════════════════════════════
-function renderCategories() {
+function renderCategories(){
   const list=document.getElementById('categories-list'); if(!list)return;
   list.innerHTML='';
   categories.forEach(c=>{
@@ -1605,29 +1538,22 @@ function renderCategories() {
     row.append(dot,name,del); list.appendChild(row);
   });
 }
-
-async function addCategory() {
+async function addCategory(){
   const nameEl=document.getElementById('new-cat-name');
   const colorEl=document.getElementById('new-cat-color');
   const name=nameEl.value.trim(); if(!name)return;
   const color=colorEl.value||'#6B6860';
   try{
     const [row]=await sb('categories',{method:'POST',body:JSON.stringify({name,color}),prefer:'return=representation'});
-    categories.push(row);
-    nameEl.value='';
-    populateCategoryDropdowns();
-    renderCategories();
-    showToast('✓ Category added');
+    categories.push(row); nameEl.value='';
+    populateCategoryDropdowns(); renderCategories(); showToast('✓ Category added');
   }catch(e){showToast('⚠ Could not save category');}
 }
-
-async function deleteCategory(id) {
+async function deleteCategory(id){
   try{
     await sb('categories?id=eq.'+id,{method:'DELETE',prefer:'return=minimal'});
     categories=categories.filter(c=>c.id!==id);
-    populateCategoryDropdowns();
-    renderCategories();
-    showToast('🗑 Category deleted');
+    populateCategoryDropdowns(); renderCategories(); showToast('🗑 Category deleted');
   }catch(e){showToast('⚠ Could not delete');}
 }
 
@@ -1636,7 +1562,6 @@ async function deleteCategory(id) {
 // ═══════════════════════════════════════════════════════
 let calYear=today.getFullYear(),calMonth=today.getMonth(),selectedDay=today.getDate();
 const MONTHS=['January','February','March','April','May','June','July','August','September','October','November','December'];
-
 function renderCalendar(){
   document.getElementById('cal-month-label').textContent=MONTHS[calMonth]+' '+calYear;
   const labels=document.getElementById('cal-labels');
@@ -1687,26 +1612,74 @@ function changeMonth(dir){
 }
 
 // ═══════════════════════════════════════════════════════
-// NLP INPUT
+// NLP PARSER
 // ═══════════════════════════════════════════════════════
-document.getElementById('nlp-input').addEventListener('keydown', e => {
-  if (e.key !== 'Enter') return;
-  const raw = e.target.value.trim();
-  if (!raw) return;
-  e.target.value = '';
-  const p = parseNLP(raw);
-  document.getElementById('preview-title').value    = p.title;
-  document.getElementById('preview-cat').value      = p.catId || '';
-  document.getElementById('preview-priority').value = p.priority;
-  document.getElementById('preview-date').value     = p.dueDate;
-  document.getElementById('preview-time').value     = p.dueTime;
-  let summary = '';
-  if (p.dueDate) {
-    const d = new Date(p.dueDate + 'T00:00:00');
-    summary += p.dueDate === todayStr ? 'Today' : p.dueDate === tomorrowStr ? 'Tomorrow' : d.toLocaleDateString('en-GB', {day:'numeric', month:'short'});
+function parseNLP(raw){
+  let text=raw.trim(); const lc=text.toLowerCase();
+  let dueDate='',dueTime='',catId=null,priority='med';
+  const timeRe=/\b(?:at\s+)(\d{1,2})(?::(\d{2}))?\b|\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/i;
+  const tm=lc.match(timeRe);
+  if(tm){
+    let h,m,ampm;
+    if(tm[5]){h=parseInt(tm[3]);m=tm[4]?parseInt(tm[4]):0;ampm=tm[5].toLowerCase();}
+    else{h=parseInt(tm[1]);m=tm[2]?parseInt(tm[2]):0;ampm='';}
+    if(ampm==='pm'&&h<12)h+=12;
+    if(ampm==='am'&&h===12)h=0;
+    dueTime=String(h).padStart(2,'0')+':'+String(m).padStart(2,'0');
   }
-  if (p.dueTime) summary += (summary ? ' · ' : '') + formatTime(p.dueTime);
-  document.getElementById('preview-summary').textContent = summary || 'No date detected — set one below';
+  const inDaysM=lc.match(/\bin (\d+) days?\b/);
+  if(inDaysM){const d=new Date(today);d.setDate(d.getDate()+parseInt(inDaysM[1]));dueDate=localDateStr(d);}
+  else if(/\btoday\b/.test(lc))dueDate=todayStr;
+  else if(/\btomorrow\b/.test(lc))dueDate=tomorrowStr;
+  else if(/\bnext week\b/.test(lc)){const d=new Date(today);d.setDate(d.getDate()+7);dueDate=localDateStr(d);}
+  else{
+    const MONS=['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
+    const mm=lc.match(/\b(\d{1,2})(?:st|nd|rd|th)?\s+([a-z]{3,9})\b/i)||lc.match(/\b([a-z]{3,9})\s+(\d{1,2})\b/i);
+    if(mm){
+      let day,mon;
+      if(!isNaN(mm[1])){day=parseInt(mm[1]);mon=mm[2].slice(0,3);}else{mon=mm[1].slice(0,3);day=parseInt(mm[2]);}
+      const mIdx=MONS.indexOf(mon.toLowerCase());
+      if(mIdx>=0&&day>=1&&day<=31){const d=new Date(today.getFullYear(),mIdx,day);if(d<today)d.setFullYear(today.getFullYear()+1);dueDate=localDateStr(d);}
+    }
+  }
+  const catMap={'Work':['meeting','report','email','client','project','deadline','presentation','work','office','boss','invoice'],'Health':['gym','workout','run','doctor','dentist','medicine','exercise','health','walk','yoga','pills'],'Travel':['flight','hotel','airport','visa','passport','trip','travel','check-in','packing','taxi'],'Personal':['call','birthday','family','dinner','groceries','shopping','buy','pay','bank','car','rent']};
+  for(const [cName,kw] of Object.entries(catMap)){
+    if(kw.some(k=>lc.includes(k))){const found=categories.find(c=>c.name===cName);if(found){catId=found.id;break;}}
+  }
+  if(/\b(urgent|asap|critical|important|high priority)\b/.test(lc))priority='high';
+  else if(/\b(low priority|whenever|no rush|minor)\b/.test(lc))priority='low';
+  let title=text
+    .replace(/\bon\s+/gi,'').replace(/\btoday\b/gi,'').replace(/\btomorrow\b/gi,'')
+    .replace(/\bnext week\b/gi,'').replace(/\bin \d+ days?\b/gi,'')
+    .replace(/\b\d{1,2}(?:st|nd|rd|th)?\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\b/gi,'')
+    .replace(/\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\s+\d{1,2}\b/gi,'')
+    .replace(/\bat\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?\b/gi,'').replace(/\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\b/gi,'')
+    .replace(/\b(urgent|asap|high priority|low priority|no rush)\b/gi,'')
+    .replace(/\s{2,}/g,' ').trim().replace(/^[,\-\s]+|[,\-\s]+$/g,'');
+  if(!title)title=text.trim();
+  return{title,dueDate,dueTime,catId,priority};
+}
+
+function showToast(msg){
+  const t=document.getElementById('nlp-toast');
+  t.textContent=msg; t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'),2800);
+}
+
+document.getElementById('nlp-input').addEventListener('keydown',e=>{
+  if(e.key!=='Enter')return;
+  const raw=e.target.value.trim(); if(!raw)return;
+  e.target.value='';
+  const p=parseNLP(raw);
+  document.getElementById('preview-title').value    =p.title;
+  document.getElementById('preview-cat').value      =p.catId||'';
+  document.getElementById('preview-priority').value =p.priority;
+  document.getElementById('preview-date').value     =p.dueDate;
+  document.getElementById('preview-time').value     =p.dueTime;
+  let summary='';
+  if(p.dueDate){const d=new Date(p.dueDate+'T00:00:00');summary+=p.dueDate===todayStr?'Today':p.dueDate===tomorrowStr?'Tomorrow':d.toLocaleDateString('en-GB',{day:'numeric',month:'short'});}
+  if(p.dueTime)summary+=(summary?' · ':'')+formatTime(p.dueTime);
+  document.getElementById('preview-summary').textContent=summary||'No date detected — set one below';
   openModal('nlp-preview');
 });
 
