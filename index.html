@@ -160,6 +160,11 @@ body { font-family:var(--font); background:var(--bg); color:var(--text-primary);
 .friend-icon-btn.call-btn { background:var(--accent); border-color:var(--accent); color:#fff; }
 .friend-icon-btn.call-btn:hover { opacity:0.88; }
 
+/* Day selector buttons */
+.day-btn { padding:0.35rem 0.6rem; border:1.5px solid var(--border); border-radius:var(--radius-sm); background:var(--surface); font-family:var(--font); font-size:12px; font-weight:500; color:var(--text-secondary); cursor:pointer; transition:all var(--tr); }
+.day-btn:hover { border-color:var(--accent); color:var(--accent); }
+.day-btn.selected { background:var(--accent); border-color:var(--accent); color:#fff; }
+
 /* Calendar */
 .cal-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:1rem; }
 .cal-nav { background:none; border:1px solid var(--border); border-radius:var(--radius-sm); width:36px; height:36px; display:flex; align-items:center; justify-content:center; cursor:pointer; font-size:18px; color:var(--text-secondary); transition:all var(--tr); }
@@ -463,14 +468,17 @@ body { font-family:var(--font); background:var(--bg); color:var(--text-primary);
   <div class="modal">
     <div class="modal-head"><h3>Add habit</h3><button class="modal-close" onclick="closeModal('add-habit')">✕</button></div>
     <div class="form-group"><label class="form-label">Habit name</label><input class="form-input" id="add-habit-name" placeholder="e.g. Gym, Read 20 pages..." /></div>
-    <div class="form-group"><label class="form-label">Icon (emoji)</label><input class="form-input" id="add-habit-icon" placeholder="🔁" maxlength="2" /></div>
-    <div class="form-group"><label class="form-label">Frequency</label>
-      <select class="form-select" id="add-habit-freq">
-        <option value="daily">Daily</option>
-        <option value="every2">Every 2 days</option>
-        <option value="every3">Every 3 days</option>
-        <option value="weekly">Weekly</option>
-      </select>
+    <div class="form-group">
+      <label class="form-label">Select days</label>
+      <div style="display:flex;gap:6px;flex-wrap:wrap" id="add-habit-days">
+        <button type="button" class="day-btn" data-day="0">Mon</button>
+        <button type="button" class="day-btn" data-day="1">Tue</button>
+        <button type="button" class="day-btn" data-day="2">Wed</button>
+        <button type="button" class="day-btn" data-day="3">Thu</button>
+        <button type="button" class="day-btn" data-day="4">Fri</button>
+        <button type="button" class="day-btn" data-day="5">Sat</button>
+        <button type="button" class="day-btn" data-day="6">Sun</button>
+      </div>
     </div>
     <div class="modal-actions"><button class="btn-ghost" onclick="closeModal('add-habit')">Cancel</button><button class="btn-primary" onclick="addHabitFromModal()">Add habit</button></div>
   </div>
@@ -488,6 +496,31 @@ body { font-family:var(--font); background:var(--bg); color:var(--text-primary);
       </select>
     </div>
     <div class="modal-actions"><button class="btn-ghost" onclick="closeModal('add-friend')">Cancel</button><button class="btn-primary" onclick="addFriendFromModal()">Add friend</button></div>
+  </div>
+</div>
+
+<!-- Edit Habit Modal -->
+<div class="modal-overlay" id="modal-edit-habit">
+  <div class="modal">
+    <div class="modal-head"><h3>Edit habit</h3><button class="modal-close" onclick="closeModal('edit-habit')">✕</button></div>
+    <div class="form-group"><label class="form-label">Habit name</label><input class="form-input" id="edit-habit-name" placeholder="Habit name" /></div>
+    <div class="form-group">
+      <label class="form-label">Select days</label>
+      <div style="display:flex;gap:6px;flex-wrap:wrap" id="edit-habit-days">
+        <button type="button" class="day-btn" data-day="0">Mon</button>
+        <button type="button" class="day-btn" data-day="1">Tue</button>
+        <button type="button" class="day-btn" data-day="2">Wed</button>
+        <button type="button" class="day-btn" data-day="3">Thu</button>
+        <button type="button" class="day-btn" data-day="4">Fri</button>
+        <button type="button" class="day-btn" data-day="5">Sat</button>
+        <button type="button" class="day-btn" data-day="6">Sun</button>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-ghost" style="color:var(--danger);border-color:var(--danger)" onclick="deleteHabit()">Delete</button>
+      <button class="btn-ghost" onclick="closeModal('edit-habit')">Cancel</button>
+      <button class="btn-primary" onclick="saveEditedHabit()">Save</button>
+    </div>
   </div>
 </div>
 
@@ -1142,16 +1175,25 @@ function renderHabits() {
 
   habits.forEach(h => {
     const logs = habitLogs[h.id] || {};
+    const initial = h.name.trim()[0].toUpperCase();
     // Build 7-day week card
     const card = document.createElement('div'); card.className='habit-card';
     const top  = document.createElement('div'); top.className='habit-card-top';
-    const icon = document.createElement('div'); icon.className='habit-icon-wrap hi-green'; icon.textContent=h.icon||'🔁';
+    const icon = document.createElement('div');
+    icon.className='habit-icon-wrap hi-green';
+    icon.style.cssText='font-size:15px;font-weight:600;font-family:var(--font)';
+    icon.textContent=initial;
     const info = document.createElement('div'); info.className='habit-info';
-    info.innerHTML=`<div class="habit-name">${h.name}</div><div class="habit-freq">${h.frequency_days===1?'Daily':'Every '+h.frequency_days+' days'}</div>`;
+    const DAY_NAMES=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+    const planned=h.planned_days||[];
+    const freqLabel=planned.length>0?planned.map(d=>DAY_NAMES[d]).join(', '):'Daily';
+    info.innerHTML=`<div class="habit-name">${h.name}</div><div class="habit-freq">${freqLabel}</div>`;
     const streak = document.createElement('div'); streak.className='streak-pill'; streak.textContent='🔥 '+calcStreak(h,logs);
+    const editBtn= document.createElement('button'); editBtn.className='history-btn'; editBtn.textContent='Edit';
+    editBtn.onclick=()=>openEditHabit(h.id);
     const histBtn= document.createElement('button'); histBtn.className='history-btn'; histBtn.textContent='History';
     histBtn.onclick=()=>openHabitHistory(h.id);
-    top.append(icon,info,streak,histBtn); card.appendChild(top);
+    top.append(icon,info,streak,editBtn,histBtn); card.appendChild(top);
 
     const weekDiv=document.createElement('div'); weekDiv.className='habit-week'; weekDiv.id='hw-'+h.id;
     card.appendChild(weekDiv);
@@ -1160,19 +1202,20 @@ function renderHabits() {
 
     // Today's habits row
     if (todayHabits) {
-      const planned = isPlannedToday(h);
       const todayLog = logs[todayStr];
       const row = document.createElement('div');
       row.className='task-item'; row.style.cssText='align-items:center;gap:10px';
-      const icon2=document.createElement('span'); icon2.style.cssText='font-size:20px;flex-shrink:0'; icon2.textContent=h.icon||'🔁';
+      const avatarEl=document.createElement('div');
+      avatarEl.style.cssText='width:32px;height:32px;border-radius:8px;background:var(--accent-soft);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:600;color:var(--accent);flex-shrink:0';
+      avatarEl.textContent=initial;
       const body=document.createElement('div'); body.className='task-body';
-      body.innerHTML=`<div class="task-title">${h.name}</div><div class="task-meta"><span class="tag-time">${h.frequency_days===1?'Daily':'Every '+h.frequency_days+' days'}</span></div>`;
+      body.innerHTML=`<div class="task-title">${h.name}</div><div class="task-meta"><span class="tag-time">${freqLabel}</span></div>`;
       const btn=document.createElement('button');
       btn.className='btn-sm '+(todayLog==='done'?'btn-sm-ghost':'btn-sm-accent');
       btn.textContent=todayLog==='done'?'✓ Done':'Log';
       if (todayLog==='done'){btn.style.opacity='0.6';btn.disabled=true;}
       btn.onclick=()=>logHabitToday(h.id,btn);
-      row.append(icon2,body,btn);
+      row.append(avatarEl,body,btn);
       todayHabits.appendChild(row);
     }
   });
@@ -1267,20 +1310,75 @@ async function logHabitToday(habitId, btn) {
   btn.textContent='✓ Done'; btn.disabled=true; btn.style.opacity='0.6';
 }
 
+// ── Day button toggle logic ──
+function initDayBtns(containerId) {
+  document.querySelectorAll('#'+containerId+' .day-btn').forEach(btn => {
+    btn.addEventListener('click', () => btn.classList.toggle('selected'));
+  });
+}
+function getSelectedDays(containerId) {
+  const selected = [];
+  document.querySelectorAll('#'+containerId+' .day-btn.selected').forEach(btn => {
+    selected.push(parseInt(btn.dataset.day));
+  });
+  return selected;
+}
+function setSelectedDays(containerId, days) {
+  document.querySelectorAll('#'+containerId+' .day-btn').forEach(btn => {
+    btn.classList.toggle('selected', days.includes(parseInt(btn.dataset.day)));
+  });
+}
+initDayBtns('add-habit-days');
+initDayBtns('edit-habit-days');
+
 async function addHabitFromModal() {
   const name=document.getElementById('add-habit-name').value.trim();
   if(!name){document.getElementById('add-habit-name').focus();return;}
-  const freqVal=document.getElementById('add-habit-freq').value;
-  const freqDays=freqVal==='daily'?1:freqVal==='every2'?2:freqVal==='every3'?3:7;
+  const plannedDays=getSelectedDays('add-habit-days');
+  if(plannedDays.length===0){showToast('Please select at least one day');return;}
+  // frequency_days = 1 always since days control the schedule
   try {
-    const [row]=await sb('habits',{method:'POST',body:JSON.stringify({name,frequency_days:freqDays,active:true}),prefer:'return=representation'});
+    const [row]=await sb('habits',{method:'POST',body:JSON.stringify({name,frequency_days:1,planned_days:plannedDays,active:true}),prefer:'return=representation'});
     habits.push(row);
     habitLogs[row.id]={};
     document.getElementById('add-habit-name').value='';
+    setSelectedDays('add-habit-days',[]);
     closeModal('add-habit');
     renderHabits();
     showToast('✓ Habit added');
   } catch(e){showToast('⚠ Could not save habit');}
+}
+
+let editingHabitId=null;
+function openEditHabit(id) {
+  const h=habits.find(x=>x.id===id); if(!h)return;
+  editingHabitId=id;
+  document.getElementById('edit-habit-name').value=h.name;
+  setSelectedDays('edit-habit-days', h.planned_days||[]);
+  openModal('edit-habit');
+}
+async function saveEditedHabit() {
+  const h=habits.find(x=>x.id===editingHabitId); if(!h)return;
+  const name=document.getElementById('edit-habit-name').value.trim();
+  if(!name){document.getElementById('edit-habit-name').focus();return;}
+  const plannedDays=getSelectedDays('edit-habit-days');
+  if(plannedDays.length===0){showToast('Please select at least one day');return;}
+  try {
+    await sb('habits?id=eq.'+editingHabitId,{method:'PATCH',body:JSON.stringify({name,planned_days:plannedDays}),prefer:'return=minimal'});
+    h.name=name; h.planned_days=plannedDays;
+    closeModal('edit-habit');
+    renderHabits();
+    showToast('✓ Habit updated');
+  } catch(e){showToast('⚠ Could not update habit');}
+}
+async function deleteHabit() {
+  try {
+    await sb('habits?id=eq.'+editingHabitId,{method:'PATCH',body:JSON.stringify({active:false}),prefer:'return=minimal'});
+    habits=habits.filter(x=>x.id!==editingHabitId);
+    closeModal('edit-habit');
+    renderHabits();
+    showToast('🗑 Habit removed');
+  } catch(e){showToast('⚠ Could not delete habit');}
 }
 
 function openHabitHistory(habitId) {
