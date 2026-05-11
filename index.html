@@ -306,8 +306,8 @@ body { font-family:var(--font); background:var(--bg); color:var(--text-primary);
       </div>
       <div class="stat-card info-card" onclick="scrollToHabits()">
         <div class="stat-label">Habits</div>
-        <div class="stat-num">4</div>
-        <div class="stat-sub">1 logged</div>
+        <div class="stat-num">–</div>
+        <div class="stat-sub">loading...</div>
       </div>
     </div>
 
@@ -884,6 +884,19 @@ function renderToday() {
   document.getElementById('stat-overdue').textContent   = overdue.length;
   document.getElementById('today-due-count').textContent   = dueToday.length;
   document.getElementById('today-overdue-count').textContent = overdue.length;
+
+  // Habits stat — planned for today, not yet logged
+  const todayDowNow = (new Date().getDay()+6)%7;
+  const plannedToday = habits.filter(h => h.planned_days && h.planned_days.includes(todayDowNow));
+  const loggedToday  = plannedToday.filter(h => habitLogs[h.id] && habitLogs[h.id][todayStr] === 'done');
+  const unloggedToday = plannedToday.filter(h => !habitLogs[h.id] || habitLogs[h.id][todayStr] !== 'done');
+  const habitStatEl = document.querySelector('.stat-card.info-card .stat-num');
+  const habitSubEl  = document.querySelector('.stat-card.info-card .stat-sub');
+  if (habitStatEl) habitStatEl.textContent = unloggedToday.length;
+  if (habitSubEl)  habitSubEl.textContent  = loggedToday.length + ' logged today';
+  const habitCountEl = document.getElementById('today-habits-count');
+  if (habitCountEl) habitCountEl.textContent = unloggedToday.length;
+
   const dtList = document.getElementById('today-task-list');
   dtList.innerHTML = '';
   dueToday.length===0 ? (dtList.innerHTML='<div class="empty-msg">Nothing due today 🎉</div>') : dueToday.forEach(t=>dtList.appendChild(makeTaskEl(t,renderAll)));
@@ -1239,6 +1252,8 @@ async function saveHabitLog(habitId, dateStr, status) {
     }
     renderHabits();
     showToast(status==='done'?'✓ Logged':'✗ Marked missed');
+    // Update homepage habits stat
+    renderToday();
   } catch(e){ console.error('saveHabitLog error:',e); showToast('⚠ Could not save'); }
 }
 
